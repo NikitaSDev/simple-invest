@@ -52,7 +52,6 @@ func testReq() {
 func dividends(cl *gomoex.ISSClient, security string) {
 
 	// security = "LKOH"
-	// security = "LKOH"
 	divs, err := cl.Dividends(context.Background(), security)
 	if err != nil {
 		fmt.Println(err)
