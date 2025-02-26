@@ -58,13 +58,13 @@ func dividends(w http.ResponseWriter, req *http.Request) {
 
 	security := req.URL.Query().Get("security")
 	if security == "" {
-		setError(w, "Не указана ценная бумага", http.StatusBadRequest)
+		writeError(w, "Не указана ценная бумага", http.StatusBadRequest)
 	}
 
 	divs, err := cl.Dividends(context.Background(), security)
 	if err != nil {
 		errorLog.Print(err)
-		setError(w, "Не удалось получить данные от Мосбиржи", http.StatusServiceUnavailable)
+		writeError(w, "Не удалось получить данные от Мосбиржи", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -91,7 +91,7 @@ func boardSecuritiesMOEX(w http.ResponseWriter, req *http.Request) {
 		table, err := cl.BoardSecurities(ctx, eng, market, gomoex.BoardTQBR)
 		if err != nil {
 			errorLog.Print(err)
-			setError(w, "Не удалось получить данные от Мосбиржи", http.StatusServiceUnavailable)
+			writeError(w, "Не удалось получить данные от Мосбиржи", http.StatusServiceUnavailable)
 			return
 		}
 
@@ -103,7 +103,7 @@ func boardSecuritiesMOEX(w http.ResponseWriter, req *http.Request) {
 
 }
 
-func setError(w http.ResponseWriter, textErr string, status int) {
+func writeError(w http.ResponseWriter, textErr string, status int) {
 	responseErr := map[string]string{
 		"error": textErr,
 	}
