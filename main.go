@@ -42,15 +42,48 @@ var (
 
 func main() {
 
-	infoLog = log.New(os.Stdout, "INFO", log.Ldate|log.Ltime)
+	infoLog = log.New(os.Stdout, "INFO\t", log.Ldate|log.Ltime)
 	errorLog = log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
+	defer infoLog.Print("Сервер остановлен")
+
 	cl = gomoex.NewISSClient(http.DefaultClient)
 
-	infoLog.Print("Запуск сервера")
-
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", defaultHandle)
 	mux.HandleFunc("/dividends", dividends)
 	mux.HandleFunc("/boardsecurities", boardSecuritiesMOEX)
+
+	fileServer := http.FileServer(http.Dir("./ui/static/"))
+	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
+
+	port := ":7540"
+	infoLog.Print("Запуск сервера")
+	if err := http.ListenAndServe(port, mux); err != nil {
+		errorLog.Printf("ошибка запуска сервера: %s", err.Error())
+	}
+
+}
+
+func downloadSecuritiesMOEX() error {
+
+	engine := gomoex.EngineStock
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	market := gomoex.MarketShares
+
+	infoLog.Printf("загрузка данных Мосбиржи: %s", market)
+	table, err := cl.BoardSecurities(ctx, engine, market, gomoex.BoardTQBR)
+	if err != nil {
+		errorLog.Print(err)
+		return err
+	}
+
+	for _, line := range table {
+		fmt.Println(line)
+	}
+	return nil
 
 }
 
@@ -68,9 +101,16 @@ func dividends(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	for _, div := range divs {
-		fmt.Println(div)
+	resp, err := json.Marshal(divs)
+	if err != nil {
+		errorLog.Print(err)
+		writeError(w, "Не удалось сериализовать данные", http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
 
 }
 
@@ -114,4 +154,8 @@ func writeError(w http.ResponseWriter, textErr string, status int) {
 	w.WriteHeader(status)
 	w.Write(errJSON)
 
+}
+
+func defaultHandle(w http.ResponseWriter, req *http.Request) {
+	w.Write([]byte("Сервер запущен"))
 }
