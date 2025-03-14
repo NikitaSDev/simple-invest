@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,12 +11,14 @@ import (
 	"time"
 
 	"github.com/WLM1ke/gomoex"
+	_ "github.com/lib/pq"
 )
 
 var (
 	cl       *gomoex.ISSClient
 	infoLog  *log.Logger
 	errorLog *log.Logger
+	DB       *sql.DB
 )
 
 /*
@@ -48,10 +51,24 @@ func main() {
 
 	cl = gomoex.NewISSClient(http.DefaultClient)
 
+	connstr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=%s",
+		"postgres",
+		"postgres",
+		"invest_db",
+		"disable")
+
+	var err error
+	DB, err = sql.Open("postgres", connstr)
+	if err != nil {
+		// errorLog.Panic(fmt.Sprintf("ошибка подключения к базе данных: %s", err.Error()))
+		errorLog.Panicf("ошибка подключения к базе данных: %s", err.Error())
+	}
+	defer DB.Close()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", defaultHandle)
 	mux.HandleFunc("/dividends", dividends)
-	mux.HandleFunc("/boardsecurities", boardSecuritiesMOEX)
+	mux.HandleFunc("/securities", securities)
 
 	fileServer := http.FileServer(http.Dir("./ui/static/"))
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
@@ -64,27 +81,59 @@ func main() {
 
 }
 
-func downloadSecuritiesMOEX() error {
+func securities(w http.ResponseWriter, req *http.Request) {
 
-	engine := gomoex.EngineStock
+	update := req.URL.Query().Get("update")
+	if update == "yes" {
+		secs, err := boardSecuritiesMOEX()
+		if err != nil {
+			errorLog.Print(err.Error())
+			writeError(w, err.Error(), http.StatusInternalServerError)
+		}
+		// Ticker     string
+		// LotSize    int
+		// ISIN       string
+		// Board      string
+		// Type       string
+		// Instrument string
+		for _, s := range secs {
+			_, err := DB.Exec(`
+			INSERT INTO securities (ticker, lotsize, isin. board, instrument)
+			VALUES ($1, $2, $3, $4, $5, $6)`, s.Ticker, s.LotSize, s.ISIN, s.Board, s.Instrument)
+			if err != nil {
+				errorLog.Print(err.Error())
+				writeError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			infoLog.Printf("added security: %s (%s)", s.Instrument, s.Ticker)
+		}
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
+	rows, err := DB.Query(
+		`SELECT
+	ticker, lotsize, isin, board, instrument
+	FROM securities`)
 
-	market := gomoex.MarketShares
-
-	infoLog.Printf("загрузка данных Мосбиржи: %s", market)
-	table, err := cl.BoardSecurities(ctx, engine, market, gomoex.BoardTQBR)
 	if err != nil {
-		errorLog.Print(err)
-		return err
+		errorLog.Print(err.Error())
+		writeError(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+	defer rows.Close()
 
-	for _, line := range table {
-		fmt.Println(line)
+	secs := []gomoex.Security{}
+	for rows.Next() {
+		s := gomoex.Security{}
+		err := rows.Scan(&s.Ticker, &s.LotSize, &s.ISIN, &s.Board, &s.Instrument)
+		if err != nil {
+			errorLog.Print(err.Error())
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		secs = append(secs, s)
+		fmt.Print("reading security", s)
 	}
-	return nil
-
+	fmt.Println(secs)
 }
 
 func dividends(w http.ResponseWriter, req *http.Request) {
@@ -114,11 +163,13 @@ func dividends(w http.ResponseWriter, req *http.Request) {
 
 }
 
-func boardSecuritiesMOEX(w http.ResponseWriter, req *http.Request) {
+func boardSecuritiesMOEX() ([]gomoex.Security, error) {
 
 	engines := []string{
 		gomoex.EngineStock,
 	}
+
+	table := []gomoex.Security{}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
@@ -128,11 +179,12 @@ func boardSecuritiesMOEX(w http.ResponseWriter, req *http.Request) {
 	for _, eng := range engines {
 
 		fmt.Println("market:", market)
-		table, err := cl.BoardSecurities(ctx, eng, market, gomoex.BoardTQBR)
+		var err error
+		table, err = cl.BoardSecurities(ctx, eng, market, gomoex.BoardTQBR)
 		if err != nil {
 			errorLog.Print(err)
-			writeError(w, "Не удалось получить данные от Мосбиржи", http.StatusServiceUnavailable)
-			return
+			// writeError(w, "Не удалось получить данные от Мосбиржи", http.StatusServiceUnavailable)
+			return table, err
 		}
 
 		for _, line := range table {
@@ -140,6 +192,7 @@ func boardSecuritiesMOEX(w http.ResponseWriter, req *http.Request) {
 		}
 
 	}
+	return table, nil
 
 }
 
@@ -157,5 +210,6 @@ func writeError(w http.ResponseWriter, textErr string, status int) {
 }
 
 func defaultHandle(w http.ResponseWriter, req *http.Request) {
-	w.Write([]byte("Сервер запущен"))
+	// w.Write([]byte("Сервер запущен"))
+	w.WriteHeader(http.StatusNotFound)
 }

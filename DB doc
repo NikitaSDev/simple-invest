@@ -21,3 +21,12 @@ sectype varchar(2) NOT NULL,
 instrument varchar(6) NOT NULL
 );
 
+v2:
+CREATE TABLE securities (
+isin char(12) PRIMARY KEY NOT NULL,
+ticker varchar(6) NOT NULL,
+lotsize integer NOT NULL,
+board varchar(6) NOT NULL,
+sectype varchar(2) NOT NULL,
+instrument varchar(6) NOT NULL
+);
