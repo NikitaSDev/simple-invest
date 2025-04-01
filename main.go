@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -14,11 +15,39 @@ import (
 	_ "github.com/lib/pq"
 )
 
+type Coupon struct {
+	Isin             string  `json:"isin"`             // ISIN код
+	Name             string  `json:"name"`             // Наименование облигации
+	Issuevalue       float64 `json:"issuevalue"`       // Размер выпуска
+	Coupondate       string  `json:"coupondate"`       // Дата начала купонного периода
+	Recorddate       string  `json:"recorddate"`       // Дата фиксации списка держателей
+	Startdate        string  `json:"startdate"`        // Дата начала купонного периода
+	Initialfacevalue float64 `json:"initialfacevalue"` // Первоначальная номинальная стоимость
+	Facevalue        float64 `json:"facevalue"`        // Номинальная стоимость
+	Faceunit         string  `json:"faceunit"`         // Процентная ставка купона
+	Value            float64 `json:"value"`            // Сумма купона, в валюте номинала
+	Valueprc         float64 `json:"valueprc"`         // Ставка купона, %
+	ValueRub         float64 `json:"value_rub"`        // Сумма купона, руб
+	Secid            string  `json:"secid"`            // Идентификатор облигации
+	PrimaryBoardid   string  `json:"primary_boardid"`  // Идентификатор режима торгов
+}
+
+type APIResponse struct {
+	Coupons struct {
+		Columns []string        `json:"columns"` // Названия колонок
+		Data    [][]interface{} `json:"data"`    // Данные
+	} `json:"coupons"`
+}
+
 var (
 	cl       *gomoex.ISSClient
 	infoLog  *log.Logger
 	errorLog *log.Logger
 	DB       *sql.DB
+)
+
+const (
+	ofz26238 = "SU26238RMFS4"
 )
 
 /*
@@ -51,26 +80,22 @@ func main() {
 
 	cl = gomoex.NewISSClient(http.DefaultClient)
 
-	connstr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=%s",
-		"postgres",
-		"postgres",
-		"invest_db",
-		"disable")
-
 	var err error
-	DB, err = sql.Open("postgres", connstr)
+	DB, err = connectDB()
 	if err != nil {
-		// errorLog.Panic(fmt.Sprintf("ошибка подключения к базе данных: %s", err.Error()))
 		errorLog.Panicf("ошибка подключения к базе данных: %s", err.Error())
+		return
 	}
 	defer DB.Close()
+	infoLog.Print("Подключение к базе данных установлено")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", defaultHandle)
 	mux.HandleFunc("/dividends", dividends)
-	mux.HandleFunc("/securities", securities)
+	mux.HandleFunc("/shares", shares)
+	mux.HandleFunc("/coupons", coupons)
 
-	fileServer := http.FileServer(http.Dir("./ui/static/"))
+	fileServer := http.FileServer(http.Dir("./ui/static/")) // Проверить или удалить
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
 
 	port := ":7540"
@@ -81,38 +106,31 @@ func main() {
 
 }
 
-func securities(w http.ResponseWriter, req *http.Request) {
+func connectDB() (*sql.DB, error) {
+
+	connstr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=%s",
+		"postgres",
+		"postgres",
+		"invest_db",
+		"disable")
+	db, err := sql.Open("postgres", connstr)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+func shares(w http.ResponseWriter, req *http.Request) {
 
 	update := req.URL.Query().Get("update")
 	if update == "yes" {
-		secs, err := boardSecuritiesMOEX()
-		if err != nil {
+		if err := downloadShares(); err != nil {
 			errorLog.Print(err.Error())
 			writeError(w, err.Error(), http.StatusInternalServerError)
 		}
-		// Ticker     string
-		// LotSize    int
-		// ISIN       string
-		// Board      string
-		// Type       string
-		// Instrument string
-		for _, s := range secs {
-			_, err := DB.Exec(`
-			INSERT INTO securities (ticker, lotsize, isin. board, instrument)
-			VALUES ($1, $2, $3, $4, $5, $6)`, s.Ticker, s.LotSize, s.ISIN, s.Board, s.Instrument)
-			if err != nil {
-				errorLog.Print(err.Error())
-				writeError(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			infoLog.Printf("added security: %s (%s)", s.Instrument, s.Ticker)
-		}
 	}
 
-	rows, err := DB.Query(
-		`SELECT
-	ticker, lotsize, isin, board, instrument
-	FROM securities`)
+	rows, err := DB.Query("SELECT ticker, lotsize, isin, board, instrument FROM securities")
 
 	if err != nil {
 		errorLog.Print(err.Error())
@@ -131,9 +149,9 @@ func securities(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		secs = append(secs, s)
-		fmt.Print("reading security", s)
+		fmt.Println("reading security", s)
 	}
-	fmt.Println(secs)
+	// fmt.Println(secs)
 }
 
 func dividends(w http.ResponseWriter, req *http.Request) {
@@ -163,11 +181,11 @@ func dividends(w http.ResponseWriter, req *http.Request) {
 
 }
 
-func boardSecuritiesMOEX() ([]gomoex.Security, error) {
+func boardSecuritiesMOEX(engine string) ([]gomoex.Security, error) {
 
-	engines := []string{
-		gomoex.EngineStock,
-	}
+	// engines := []string{
+	// gomoex.EngineStock,
+	// }
 
 	table := []gomoex.Security{}
 
@@ -176,24 +194,118 @@ func boardSecuritiesMOEX() ([]gomoex.Security, error) {
 
 	market := gomoex.MarketShares
 
-	for _, eng := range engines {
+	// for _, eng := range engines {
 
-		fmt.Println("market:", market)
-		var err error
-		table, err = cl.BoardSecurities(ctx, eng, market, gomoex.BoardTQBR)
-		if err != nil {
-			errorLog.Print(err)
-			// writeError(w, "Не удалось получить данные от Мосбиржи", http.StatusServiceUnavailable)
-			return table, err
-		}
-
-		for _, line := range table {
-			fmt.Println(line)
-		}
-
+	fmt.Println("market:", market)
+	var err error
+	table, err = cl.BoardSecurities(ctx, engine, market, gomoex.BoardTQBR)
+	if err != nil {
+		errorLog.Print(err)
+		return table, err
 	}
+
+	for _, line := range table {
+		fmt.Println(line)
+	}
+
+	// }
 	return table, nil
 
+}
+
+func downloadShares() (err error) {
+
+	secs, err := boardSecuritiesMOEX(gomoex.EngineStock)
+	if err != nil {
+		return err
+	}
+
+	infoLog.Print("Загрузка данных с Мосбиржи: акции")
+	for _, s := range secs {
+		_, err := DB.Exec(`
+		INSERT INTO securities (isin, ticker, lotsize, board, sectype, instrument)
+		VALUES ($1, $2, $3, $4, $5, $6)`, s.ISIN, s.Ticker, s.LotSize, s.Board, s.Type, s.Instrument)
+		if err != nil {
+			return err
+		}
+		infoLog.Printf("added security: %s (%s)", s.Instrument, s.Ticker)
+	}
+	return nil
+
+}
+
+func downloadBonds() {
+
+}
+
+func coupons(w http.ResponseWriter, req *http.Request) {
+	isin := req.URL.Query().Get("isin")
+	if isin == "" {
+		isin = ofz26238
+	}
+	url := fmt.Sprintf("https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization/%s.json", isin)
+
+	// Проверить варианты ресурса
+	// https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization/SU26209RMFS5.json?from=%7BdateString%7D&iss.only=coupons,amortizations&iss.meta=off
+	// https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization?from=2020-02-01&till=2020-02-20&start=0&limit=100&iss.only=amortizations,coupons
+	// https://iss.moex.com/iss/securities/RU000A0JXQ85/bondization.json?iss.json=extended&iss.meta=off&iss.only=coupons&lang=ru&limit=unlimited
+
+	// Выполняем GET-запрос
+	resp, err := http.Get(url)
+	if err != nil {
+		// fmt.Println("Ошибка при выполнении запроса:", err)
+		errorLog.Print(err.Error())
+		writeError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Читаем тело ответа
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Ошибка при чтении ответа:", err)
+		return
+	}
+
+	// Парсим JSON
+	var apiResponse APIResponse
+	err = json.Unmarshal(body, &apiResponse)
+	if err != nil {
+		fmt.Println("Ошибка при парсинге JSON:", err)
+		return
+	}
+
+	// Преобразуем данные в структуру Coupon
+	var coupons []Coupon
+	for _, row := range apiResponse.Coupons.Data {
+		fmt.Println(row...)
+		coupon := Coupon{
+			Isin:             row[0].(string),
+			Name:             row[1].(string),
+			Issuevalue:       row[2].(float64),
+			Coupondate:       row[3].(string),
+			Recorddate:       row[4].(string),
+			Startdate:        row[5].(string),
+			Initialfacevalue: row[6].(float64),
+			Facevalue:        row[7].(float64),
+			Faceunit:         row[8].(string),
+			Value:            row[9].(float64),
+			Valueprc:         row[10].(float64),
+			ValueRub:         row[11].(float64),
+			Secid:            row[12].(string),
+			PrimaryBoardid:   row[13].(string),
+		}
+		coupons = append(coupons, coupon)
+	}
+
+	// Выводим данные о купонах
+	for _, coupon := range coupons {
+		fmt.Printf("Облигация: %s\n", coupon.Name)
+		fmt.Printf("Дата выплаты: %s\n", coupon.Coupondate)
+		fmt.Printf("Размер купона: %.2f %s\n", coupon.Value, coupon.Faceunit)
+		fmt.Printf("Процентная ставка: %.2f%%\n", coupon.Valueprc)
+		fmt.Println("---")
+	}
 }
 
 func writeError(w http.ResponseWriter, textErr string, status int) {
@@ -210,6 +322,6 @@ func writeError(w http.ResponseWriter, textErr string, status int) {
 }
 
 func defaultHandle(w http.ResponseWriter, req *http.Request) {
-	// w.Write([]byte("Сервер запущен"))
-	w.WriteHeader(http.StatusNotFound)
+	w.Write([]byte("Сервер запущен"))
+	// w.WriteHeader(http.StatusNotFound)
 }
