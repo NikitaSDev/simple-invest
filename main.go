@@ -149,7 +149,7 @@ func shares(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		secs = append(secs, s)
-		fmt.Println("reading security", s)
+		// fmt.Println("reading security", s)
 	}
 	// fmt.Println(secs)
 }
@@ -183,32 +183,18 @@ func dividends(w http.ResponseWriter, req *http.Request) {
 
 func boardSecuritiesMOEX(engine string) ([]gomoex.Security, error) {
 
-	// engines := []string{
-	// gomoex.EngineStock,
-	// }
-
-	table := []gomoex.Security{}
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
 	market := gomoex.MarketShares
 
-	// for _, eng := range engines {
-
-	fmt.Println("market:", market)
 	var err error
-	table, err = cl.BoardSecurities(ctx, engine, market, gomoex.BoardTQBR)
+	table, err := cl.BoardSecurities(ctx, engine, market, gomoex.BoardTQBR)
 	if err != nil {
 		errorLog.Print(err)
 		return table, err
 	}
 
-	for _, line := range table {
-		fmt.Println(line)
-	}
-
-	// }
 	return table, nil
 
 }
@@ -220,16 +206,39 @@ func downloadShares() (err error) {
 		return err
 	}
 
-	infoLog.Print("Загрузка данных с Мосбиржи: акции")
-	for _, s := range secs {
-		_, err := DB.Exec(`
-		INSERT INTO securities (isin, ticker, lotsize, board, sectype, instrument)
-		VALUES ($1, $2, $3, $4, $5, $6)`, s.ISIN, s.Ticker, s.LotSize, s.Board, s.Type, s.Instrument)
+	existing := make(map[string]bool)
+	rows, err := DB.Query("SELECT isin FROM securities")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var isin string
+		err = rows.Scan(&isin)
 		if err != nil {
 			return err
 		}
-		infoLog.Printf("added security: %s (%s)", s.Instrument, s.Ticker)
+		existing[isin] = false
 	}
+
+	infoLog.Print("Загрузка данных с Мосбиржи: акции")
+	var loaded, updated int64
+	for _, s := range secs {
+		_, ok := existing[s.ISIN]
+		if ok {
+			// тут обновление
+			updated++
+		} else {
+			_, err := DB.Exec(`
+			INSERT INTO securities (isin, ticker, lotsize, board, sectype, instrument)
+			VALUES ($1, $2, $3, $4, $5, $6)`, s.ISIN, s.Ticker, s.LotSize, s.Board, s.Type, s.Instrument)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("added security: %s (%s)", s.Instrument, s.Ticker)
+			loaded++
+		}
+	}
+	infoLog.Printf("Результат закгрузки данных\nзагружено: %d, обновлено: %d", loaded, updated)
 	return nil
 
 }
