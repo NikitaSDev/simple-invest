@@ -21,7 +21,9 @@ func main() {
 	mux.HandleFunc("/shares", handlers.Shares)
 	mux.HandleFunc("/bonds", handlers.Bonds)
 	mux.HandleFunc("/coupons", handlers.Coupons)
-	mux.HandleFunc("/markethistory", handlers.MarketHistori)
+	mux.HandleFunc("/amortizations", handlers.Amortizations)
+	mux.HandleFunc("/markethistory", handlers.MarketHistory)
+	mux.HandleFunc("/bondindicators", handlers.BondIndicators)
 
 	fileServer := http.FileServer(http.Dir("./ui/static/")) // Проверить или удалить
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
