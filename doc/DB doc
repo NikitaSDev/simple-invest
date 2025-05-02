@@ -61,3 +61,11 @@ https://iss.moex.com/iss/engines/stock/markets/bonds/securities/SU26238RMFS4.jso
 url := "https://iss.moex.com/iss/engines/stock/markets/shares/securities.json?iss.meta=off&iss.only=marketdata&marketdata.columns=SECID,LAST,CHANGE,LASTTOPREVPRICE,OPEN,HIGH,LOW,VALUE"
 Пример с описания api https://iss.moex.com/iss/reference/419
 https://iss.moex.com/iss/engines/stock/markets/shares/securities.xml
+
+Купоны облигации
+https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization/RU000A103VD8.json
+
+Проверить варианты ресурсов получения купонов
+https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization/SU26209RMFS5.json?from=%7BdateString%7D&iss.only=coupons,amortizations&iss.meta=off
+https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization?from=2020-02-01&till=2020-02-20&start=0&limit=100&iss.only=amortizations,coupons
+https://iss.moex.com/iss/securities/RU000A0JXQ85/bondization.json?iss.json=extended&iss.meta=off&iss.only=coupons&lang=ru&limit=unlimited
