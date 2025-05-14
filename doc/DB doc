@@ -1,3 +1,14 @@
+Показатели:
+
+Текущая доходность - отношение купонной ставки к чистой цене облигации (где чистая цена это: рыночная цена минус НКД)
+Итоговая текущая доходность - текущая доходность где купонная ставка взята с учётом налога
+
+Простой доход - сумма всех купонов плюс разница между ценой и номиналом
+Простая доходность - отношение суммы остаточной стоимости и простого дохода к цене
+
+Итоговый простой доход - простой доход после налогов на купоны и на разницу между ценой и номиналом с учётом ЛДВ
+Итоговая простая доходность - простая доходность с учётом налогов
+
 
 Торговые системы
 EngineStock    = "stock"    // Фондовый рынок и рынок депозитов
@@ -53,12 +64,22 @@ sectype varchar(2) NOT NULL,
 instrument varchar(6) NOT NULL
 );
 
+Получить данные по конкретному инструменту рынка.
+https://iss.moex.com/iss/engines/stock/markets/bonds/securities/RU000A108AJ8.json?iss.meta=off
+
+Запрос облигации и необходимые поля расчёта показателей облигации:
+https://iss.moex.com/iss/engines/stock/markets/bonds/securities/RU000A108AJ8.json?iss.meta=off&marketdata.columns=ISIN,COUPONVALUE
 
 Запрос цены облигации
-https://iss.moex.com/iss/engines/stock/markets/bonds/securities/SU26238RMFS4.json?iss.meta=off&iss.only=marketdata&marketdata.columns=LAST,CHANGE,LASTTOPREVPRICE,OPEN,HIGH,LOW,VALUE
+https://iss.moex.com/iss/engines/stock/markets/bonds/securities/RU000A108AJ8.json?iss.meta=off&iss.only=marketdata&marketdata.columns=LAST,CHANGE,LASTTOPREVPRICE,OPEN,HIGH,LOW,VALUE
+
+Цена Акции
+https://iss.moex.com/iss/engines/stock/markets/shares/securities/SBER.json
+
 
 По всему рынку
 url := "https://iss.moex.com/iss/engines/stock/markets/shares/securities.json?iss.meta=off&iss.only=marketdata&marketdata.columns=SECID,LAST,CHANGE,LASTTOPREVPRICE,OPEN,HIGH,LOW,VALUE"
+
 Пример с описания api https://iss.moex.com/iss/reference/419
 https://iss.moex.com/iss/engines/stock/markets/shares/securities.xml
 
