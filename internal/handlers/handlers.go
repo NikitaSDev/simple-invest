@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"simple-invest/internal/database"
@@ -53,7 +52,7 @@ func Shares(w http.ResponseWriter, req *http.Request) {
 func Dividends(w http.ResponseWriter, req *http.Request) {
 	isin := req.URL.Query().Get("isin")
 	if isin == "" {
-		writeError(w, "Не указана ценная бумага", http.StatusBadRequest)
+		writeError(w, "Не указан ISIN ценной бумаги", http.StatusBadRequest)
 		return
 	}
 
@@ -167,29 +166,10 @@ func Amortizations(w http.ResponseWriter, req *http.Request) {
 	writeResponse(w, resp)
 }
 
-func MarketHistory(w http.ResponseWriter, req *http.Request) {
-	isin := req.URL.Query().Get("isin")
-	if isin == "" {
-		writeError(w, "Не указана ценная бумага", http.StatusBadRequest)
-		return
-	}
-
-	quote, err := securities.MarketHistory(gomoex.EngineStock, gomoex.MarketBonds, isin, "", "")
-	if err != nil {
-		servicelog.ErrorLog().Print(err.Error())
-		writeError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	for _, dayPrice := range quote {
-		fmt.Printf("Дата: %v, открытие: %f, закрытие: %f, мин. %f, макс %f\n", dayPrice.Date, dayPrice.Open, dayPrice.Close, dayPrice.Low, dayPrice.High)
-	}
-}
-
 func BondIndicators(w http.ResponseWriter, req *http.Request) {
 	isin := req.URL.Query().Get("isin")
 	if isin == "" {
-		writeError(w, "Не указана ценная бумага", http.StatusBadRequest)
+		writeError(w, "Не указан ISIN ценной бумаги", http.StatusBadRequest)
 		return
 	}
 

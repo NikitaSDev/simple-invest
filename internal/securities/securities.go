@@ -1,8 +1,13 @@
+// Пакет securities реализует функции по работе с ценными бумагами.
+//
+// Возможности включают в себя получение данных от Мосбиржи с помощью её API, сохранение полученных данных в БД,
+// предоставление финансовых показателей по облигациям, данных по купонам и дивидендам акций.
 package securities
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -15,16 +20,15 @@ import (
 )
 
 const (
-	defaultFrom = "1997-01-01"
-	defaultTill = "2100-12-31"
-	taxRate     = 0.13
-	precision   = 4
+	taxRate   = 0.13 // Ставка налога
+	precision = 4    // Точность предоставляемых показателей
 )
 
 var (
 	cl *gomoex.ISSClient
 )
 
+// Показатели торгуемой облигации
 type bondIndicators struct {
 	Isin            string  `json:"isin"`              // Ценная бумага
 	FaceValue       float64 `json:"facevalue"`         // Текущая номинальная стоимость
@@ -42,6 +46,7 @@ type bondIndicators struct {
 	MaturityTax     float64 `json:"maturity_tax"`      // Налог при погашении
 }
 
+// Структура выплат облигации
 type BondPayments struct {
 	Coupons struct {
 		Columns []string        `json:"columns"` // Названия колонок
@@ -53,10 +58,7 @@ type BondPayments struct {
 	} `json:"amortizations"`
 }
 
-func init() {
-	cl = gomoex.NewISSClient(http.DefaultClient)
-}
-
+// Параметры конкретного купона
 type Coupon struct {
 	Isin             string  `json:"isin"`             // ISIN код
 	Coupondate       string  `json:"coupondate"`       // Дата выплаты купона
@@ -69,6 +71,7 @@ type Coupon struct {
 	ValueRub         float64 `json:"value_rub"`        // Сумма купона, руб
 }
 
+// Параметры конкретной амортизационной выплаты
 type Amortization struct {
 	Isin             string  `json:"isin"`             // ISIN код
 	Amortdate        string  `json:"amortdate"`        // Дата амортизации
@@ -79,6 +82,7 @@ type Amortization struct {
 	Value_rub        float64 `json:"value_rub"`        // Сумма амортизации, руб
 }
 
+// Структура основных свойств облигации
 type Bond struct {
 	Isin          string  `json:"isin"`                // ISIN код
 	ShortName     string  `json:"shortname"`           // Краткое наименование
@@ -94,9 +98,14 @@ type Bond struct {
 	SettleDate    string  `json:"settledate"`          // Дата расчётов сделки
 }
 
+// BondMarketData представляет торговые данные облигации:
+// Last - последняя цена сделки
 type BondMarketData struct {
 	Last float64 `json:"last"` //цена
-	// Value float64 //цена в валюте номинала
+}
+
+func init() {
+	cl = gomoex.NewISSClient(http.DefaultClient)
 }
 
 func boardSecuritiesMOEX(engine, market string) ([]gomoex.Security, error) {
@@ -120,8 +129,8 @@ func boardSecuritiesMOEX(engine, market string) ([]gomoex.Security, error) {
 	return table, nil
 }
 
+// DownloadShares загружает данные по акциям от Мосбиржи в БД.
 func DownloadShares() (err error) {
-
 	secs, err := boardSecuritiesMOEX(gomoex.EngineStock, gomoex.MarketShares)
 	if err != nil {
 		return err
@@ -176,6 +185,7 @@ func DownloadShares() (err error) {
 
 }
 
+// DownloadShares загружает данные по облигациям от Мосбиржи в БД.
 func DownloadBonds() (err error) {
 
 	secs, err := boardSecuritiesMOEX(gomoex.EngineStock, gomoex.MarketBonds)
@@ -221,23 +231,7 @@ func DownloadBonds() (err error) {
 
 }
 
-func MarketHistory(engine, market, isin, from, till string) ([]gomoex.Quote, error) {
-
-	if from == "" {
-		from = defaultFrom
-	}
-
-	if till == "" {
-		till = defaultTill
-	}
-
-	ctx := context.Background()
-	quote, err := cl.MarketHistory(ctx, engine, market, isin, from, till)
-
-	return quote, err
-
-}
-
+// Dividends получает данные о дивидидендах акции от Мосбиржи
 func Dividends(ctx context.Context, isin string) ([]gomoex.Dividend, error) {
 	dividends, err := cl.Dividends(ctx, isin)
 	if err != nil {
@@ -246,9 +240,9 @@ func Dividends(ctx context.Context, isin string) ([]gomoex.Dividend, error) {
 	return dividends, nil
 }
 
+// Coupons получает данные о купонах по облигации от Мосбиржи
 func Coupons(isin string) ([]Coupon, error) {
-	//Получить количество купонов и сравнить с размером предоставляемой порции
-	//и в цикле по порциям заполнить таблицу купонов
+	// Получение общего объёма данных и объёма, получаемого за одно обращение
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
 	defer cancel()
 	url := fmt.Sprintf("https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization/%s.json?iss.only=coupons.cursor&iss.meta=off", isin)
@@ -282,16 +276,19 @@ func Coupons(isin string) ([]Coupon, error) {
 	var couponsCursor CouponsCursor
 	err = json.Unmarshal(body, &couponsCursor)
 	if err != nil {
-		fmt.Println("Ошибка парсинга JSON:", err)
 		return nil, err
+	}
+
+	if len(couponsCursor.Cursor.Data) < 1 || len(couponsCursor.Cursor.Data[0]) < 3 {
+		return nil, errors.New("некорретная структура ответа по блокам данных")
 	}
 
 	i := couponsCursor.Cursor.Data[0][0]
 	total := couponsCursor.Cursor.Data[0][1]
 	pagesize := couponsCursor.Cursor.Data[0][2]
-	// 0 36 20
 
 	var coupons []Coupon
+	// Последовательное получение блоков данных
 	for ; i < total; i = i + pagesize {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
 		defer cancel()
@@ -345,6 +342,7 @@ func Coupons(isin string) ([]Coupon, error) {
 	return coupons, nil
 }
 
+// Amortizations получает данные об амортизационных выплатах по облигации от Мосбиржи
 func Amortizations(isin string) ([]Amortization, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
 	defer cancel()
@@ -397,6 +395,7 @@ func Amortizations(isin string) ([]Amortization, error) {
 	return amortizations, nil
 }
 
+// BondIndicators возвращает JSON с основными показателями торгуемой облигации
 func BondIndicators(isin string) (bondIndicators, error) {
 	bI := bondIndicators{Isin: isin}
 
@@ -580,97 +579,3 @@ func roundFloat(val float64, precision uint) float64 {
 	ratio := math.Pow(10, float64(precision))
 	return math.Round(val*ratio) / ratio
 }
-
-// func (bI *bondIndicators) fillMoex() (error) {
-// 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
-// 	defer cancel()
-
-// 	url := fmt.Sprintf("https://iss.moex.com/iss/engines/stock/markets/bonds/securities/%s.json?iss.meta=off&iss.only=securities,marketdata&marketdata.columns=LAST,VALUE&securities.columns=FACEVALUE,ACCRUEDINT,MATDATE,OFFERDATE", isin)
-
-// 	// Выполняем GET-запрос
-// 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	resp, err := http.DefaultClient.Do(req)
-// 	if err != nil {
-// 		servicelog.ErrorLog().Print(err.Error())
-// 		return err
-// 	}
-// 	defer resp.Body.Close()
-
-// 	// Читаем тело ответа
-// 	body, err := io.ReadAll(resp.Body)
-// 	if err != nil {
-// 		fmt.Println("Ошибка при чтении ответа:", err)
-// 		return err
-// 	}
-
-// 	// Парсим JSON
-// 	type moexBond struct {
-// 		Securities struct {
-// 			Data [][]interface{}
-// 		} `json:"securities"`
-// 		MarketData struct {
-// 			Data [][]float64 `json:"data"`
-// 		} `json:"marketdata"`
-// 	}
-
-// 	var prices moexBond
-// 	err = json.Unmarshal(body, &prices)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if len(prices.MarketData.Data) == 0 {
-// 		return nil
-// 	}
-
-// 	return nil
-// }
-
-// func lastPrice(isin string) (float64, error) {
-
-// 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
-// 	defer cancel()
-
-// 	url := fmt.Sprintf("https://iss.moex.com/iss/engines/stock/markets/bonds/securities/%s.json?iss.meta=off&iss.only=securities,marketdata&marketdata.columns=LAST,VALUE&securities.columns=FACEVALUE,ACCRUEDINT,MATDATE,OFFERDATE", isin)
-
-// 	// Выполняем GET-запрос
-// 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-
-// 	resp, err := http.DefaultClient.Do(req)
-// 	if err != nil {
-// 		servicelog.ErrorLog().Print(err.Error())
-// 		return 0, err
-// 	}
-// 	defer resp.Body.Close()
-
-// 	// Читаем тело ответа
-// 	body, err := io.ReadAll(resp.Body)
-// 	if err != nil {
-// 		fmt.Println("Ошибка при чтении ответа:", err)
-// 		return 0, err
-// 	}
-
-// 	// Парсим JSON
-// 	type Prices struct {
-// 		MarketData struct {
-// 			Data [][]float64 `json:"data"`
-// 		} `json:"marketdata"`
-// 	}
-
-// 	var prices Prices
-// 	err = json.Unmarshal(body, &prices)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	if len(prices.MarketData.Data) == 0 {
-// 		return 0, nil
-// 	}
-
-// 	return prices.MarketData.Data[0][0], nil
-// }
