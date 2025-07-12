@@ -9,10 +9,9 @@ import (
 )
 
 func main() {
-
 	defer servicelog.InfoLog().Print("Сервер остановлен")
-
 	defer database.DB().Close()
+
 	servicelog.InfoLog().Print("Подключение к базе данных установлено")
 
 	mux := http.NewServeMux()
@@ -24,13 +23,9 @@ func main() {
 	mux.HandleFunc("/amortizations", handlers.Amortizations)
 	mux.HandleFunc("/bondindicators", handlers.BondIndicators)
 
-	fileServer := http.FileServer(http.Dir("./ui/static/")) // Проверить или удалить
-	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
-
 	port := ":7540"
 	servicelog.InfoLog().Print("Запуск сервера")
 	if err := http.ListenAndServe(port, mux); err != nil {
 		servicelog.ErrorLog().Printf("ошибка запуска сервера: %s", err.Error())
 	}
-
 }

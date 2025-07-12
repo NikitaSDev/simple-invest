@@ -47,10 +47,19 @@ func Shares(w http.ResponseWriter, req *http.Request) {
 		}
 		secs = append(secs, s)
 	}
+
+	resp, err := json.Marshal(secs)
+	if err != nil {
+		servicelog.ErrorLog().Print(err)
+		writeError(w, "Не удалось сериализовать данные", http.StatusInternalServerError)
+		return
+	}
+
+	writeResponse(w, resp)
 }
 
 func Dividends(w http.ResponseWriter, req *http.Request) {
-	isin := req.URL.Query().Get("isin")
+	isin := req.URL.Query().Get("ticker")
 	if isin == "" {
 		writeError(w, "Не указан ISIN ценной бумаги", http.StatusBadRequest)
 		return

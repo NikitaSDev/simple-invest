@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"simple-invest/internal/database"
 	"simple-invest/internal/servicelog"
+	"sort"
 	"time"
 
 	"github.com/WLM1ke/gomoex"
@@ -25,7 +26,8 @@ const (
 )
 
 var (
-	cl *gomoex.ISSClient
+	cl            *gomoex.ISSClient
+	errNoMoexData = errors.New("no moex data provided")
 )
 
 // Показатели торгуемой облигации
@@ -73,13 +75,14 @@ type Coupon struct {
 
 // Параметры конкретной амортизационной выплаты
 type Amortization struct {
-	Isin             string  `json:"isin"`             // ISIN код
-	Amortdate        string  `json:"amortdate"`        // Дата амортизации
-	Facevalue        float64 `json:"facevalue"`        // Номинальная стоимость
-	Initialfacevalue float64 `json:"initialfacevalue"` // Первоначальная номинальная стоимость
-	Faceunit         string  `json:"faceunit"`         // Валюта
-	Value            float64 `json:"value"`            // Сумма амортизации, в валюте номинала
-	Value_rub        float64 `json:"value_rub"`        // Сумма амортизации, руб
+	Isin             string    `json:"isin"`             // ISIN код
+	Amortdate        string    `json:"amortdate"`        // Дата амортизации
+	Facevalue        float64   `json:"facevalue"`        // Номинальная стоимость
+	Initialfacevalue float64   `json:"initialfacevalue"` // Первоначальная номинальная стоимость
+	Faceunit         string    `json:"faceunit"`         // Валюта
+	Value            float64   `json:"value"`            // Сумма амортизации, в валюте номинала
+	ValueRub         float64   `json:"value_rub"`        // Сумма амортизации, руб
+	Date             time.Time // Дата амортизации в формате time.Time
 }
 
 // Структура основных свойств облигации
@@ -129,7 +132,7 @@ func boardSecuritiesMOEX(engine, market string) ([]gomoex.Security, error) {
 	return table, nil
 }
 
-// DownloadShares загружает данные по акциям от Мосбиржи в БД.
+// DownloadShares получает данные по акциям от Мосбиржи и сохраняет в БД.
 func DownloadShares() (err error) {
 	secs, err := boardSecuritiesMOEX(gomoex.EngineStock, gomoex.MarketShares)
 	if err != nil {
@@ -182,10 +185,9 @@ func DownloadShares() (err error) {
 
 	servicelog.InfoLog().Printf("Результат закгрузки данных\nзагружено: %d, обновлено: %d", loaded, updated)
 	return nil
-
 }
 
-// DownloadShares загружает данные по облигациям от Мосбиржи в БД.
+// DownloadShares получает данные по облигациям от Мосбиржи и сохраняет в БД.
 func DownloadBonds() (err error) {
 
 	secs, err := boardSecuritiesMOEX(gomoex.EngineStock, gomoex.MarketBonds)
@@ -387,7 +389,7 @@ func Amortizations(isin string) ([]Amortization, error) {
 			Initialfacevalue: row[5].(float64),
 			Faceunit:         row[6].(string),
 			Value:            row[8].(float64),
-			Value_rub:        row[9].(float64),
+			ValueRub:         row[9].(float64),
 		}
 		amortizations = append(amortizations, amortization)
 	}
@@ -418,8 +420,7 @@ func BondIndicators(isin string) (bondIndicators, error) {
 		return bI, err
 	}
 
-	now := time.Now()
-	today := now.Truncate(time.Hour * 24)
+	today := time.Now().Truncate(time.Hour * 24)
 
 	var settleDate time.Time
 	if bond.SettleDate == "" {
@@ -459,14 +460,28 @@ func BondIndicators(isin string) (bondIndicators, error) {
 			couponsAmount += c.Value
 		}
 	}
-	bI.SimpleYield = roundFloat((couponsAmount+bond.FaceValue-bI.Price)/bI.Price*365/float64(bI.DaysToEvent), precision)
 
+	// Для амортизируемых ооблигаций необходимо приведение периода
+	netDaysToEvent := float64(bI.DaysToEvent)
+	amortizations, err := Amortizations(isin)
+	if err != nil {
+		return bI, err
+	}
+	if len(amortizations) > 0 {
+		netDaysToEvent, err = amortizationsNetPeriod(amortizations, settleDate)
+		if err != nil {
+			return bI, err
+		}
+	}
+
+	bI.SimpleYield = roundFloat((couponsAmount+bond.FaceValue-bI.Price)/bI.Price*365/netDaysToEvent, precision)
 	creditDate := settleDate.AddDate(3, 0, 0) // дата для ЛДВ
 	matTax := 0.0
 	if !eventDate.After(creditDate) && bI.Price < bond.FaceValue {
 		matTax = roundFloat((bond.FaceValue-bI.Price)*taxRate, 2)
 	}
-	bI.NetSimpleYield = roundFloat((couponsAmount*(1-taxRate)+bond.FaceValue-matTax-bI.Price)/bI.Price*365/float64(bI.DaysToEvent), precision)
+	bI.NetSimpleYield = roundFloat((couponsAmount*(1-taxRate)+bond.FaceValue-matTax-bI.Price)/bI.Price*365/netDaysToEvent, precision)
+
 	bI.MaturityTax = matTax
 
 	return bI, nil
@@ -570,7 +585,14 @@ func moexBondMarketData(isin string) (BondMarketData, error) {
 	}
 
 	for _, row := range moexData.MarketData.Data {
-		marketData.Last = row[0].(float64)
+		if row[0] == nil {
+			return marketData, errNoMoexData
+		}
+		var ok bool
+		marketData.Last, ok = row[0].(float64)
+		if !ok {
+			return marketData, fmt.Errorf("cannot convert data %v to float64", row[0])
+		}
 	}
 	return marketData, nil
 }
@@ -578,4 +600,39 @@ func moexBondMarketData(isin string) (BondMarketData, error) {
 func roundFloat(val float64, precision uint) float64 {
 	ratio := math.Pow(10, float64(precision))
 	return math.Round(val*ratio) / ratio
+}
+
+func amortizationsNetPeriod(am []Amortization, settleDate time.Time) (float64, error) {
+	if len(am) < 2 {
+		return 0, nil
+	}
+
+	sort.SliceStable(am, func(i, j int) bool {
+		return am[i].Amortdate < am[j].Amortdate
+	})
+
+	var netPeriod, periodFaceValue, pAmortization float64
+	var pDate time.Time
+	init := false
+	for i := range am {
+		date, err := time.Parse(time.DateOnly, am[i].Amortdate)
+		if err != nil {
+			return 0, err
+		}
+		if date.Compare(settleDate) > 0 {
+			if !init {
+				netPeriod = date.Sub(settleDate).Hours() / 24
+				pDate = date
+				periodFaceValue = am[i].Facevalue
+				pAmortization = am[i].ValueRub
+				init = true
+				continue
+			}
+			periodFaceValue -= pAmortization
+			netPeriod += date.Sub(pDate).Hours() / 24 * periodFaceValue / am[i].Facevalue
+			pAmortization = am[i].ValueRub
+			pDate = date
+		}
+	}
+	return netPeriod, nil
 }
