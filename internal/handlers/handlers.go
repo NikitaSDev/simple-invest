@@ -6,46 +6,36 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"simple-invest/internal/database"
 	"simple-invest/internal/securities"
 	"simple-invest/internal/servicelog"
-
-	"github.com/WLM1ke/gomoex"
 )
 
-func DefaultHandle(w http.ResponseWriter, req *http.Request) {
+type Handler struct {
+	service *securities.SecuritiesService
+}
+
+func New(service *securities.SecuritiesService) *Handler {
+	return &Handler{service: service}
+}
+
+func (h *Handler) DefaultHandle(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte("Сервер запущен"))
 }
 
-func Shares(w http.ResponseWriter, req *http.Request) {
-
+func (h *Handler) Shares(w http.ResponseWriter, req *http.Request) {
 	update := req.URL.Query().Get("update")
 	if update == "yes" {
-		if err := securities.DownloadShares(); err != nil {
+		if err := h.service.DownloadShares(); err != nil {
 			servicelog.ErrorLog().Print(err.Error())
 			writeError(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
 
-	rows, err := database.DB().Query("SELECT ticker, lotsize, isin, board, instrument FROM securities")
-
+	secs, err := h.service.Shares()
 	if err != nil {
 		servicelog.ErrorLog().Print(err.Error())
 		writeError(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	defer rows.Close()
-
-	secs := []gomoex.Security{}
-	for rows.Next() {
-		s := gomoex.Security{}
-		err := rows.Scan(&s.Ticker, &s.LotSize, &s.ISIN, &s.Board, &s.Instrument)
-		if err != nil {
-			servicelog.ErrorLog().Print(err.Error())
-			writeError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		secs = append(secs, s)
 	}
 
 	resp, err := json.Marshal(secs)
@@ -58,10 +48,10 @@ func Shares(w http.ResponseWriter, req *http.Request) {
 	writeResponse(w, resp)
 }
 
-func Dividends(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) Dividends(w http.ResponseWriter, req *http.Request) {
 	isin := req.URL.Query().Get("ticker")
 	if isin == "" {
-		writeError(w, "Не указан ISIN ценной бумаги", http.StatusBadRequest)
+		writeError(w, "Не указан код ценной бумаги", http.StatusBadRequest)
 		return
 	}
 
@@ -83,34 +73,20 @@ func Dividends(w http.ResponseWriter, req *http.Request) {
 
 }
 
-func Bonds(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) Bonds(w http.ResponseWriter, req *http.Request) {
 	update := req.URL.Query().Get("update")
 	if update == "yes" {
-		if err := securities.DownloadBonds(); err != nil {
+		if err := h.service.DownloadBonds(); err != nil {
 			servicelog.ErrorLog().Print(err.Error())
 			writeError(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
 
-	rows, err := database.DB().Query("SELECT ticker, lotsize, isin, board, instrument FROM securities")
-
+	secs, err := h.service.Bonds()
 	if err != nil {
 		servicelog.ErrorLog().Print(err.Error())
 		writeError(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	defer rows.Close()
-
-	secs := []gomoex.Security{}
-	for rows.Next() {
-		s := gomoex.Security{}
-		err := rows.Scan(&s.Ticker, &s.LotSize, &s.ISIN, &s.Board, &s.Instrument)
-		if err != nil {
-			servicelog.ErrorLog().Print(err.Error())
-			writeError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		secs = append(secs, s)
 	}
 
 	resp, err := json.Marshal(secs)
@@ -120,10 +96,38 @@ func Bonds(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// rows, err := database.DB().Query("SELECT ticker, lotsize, isin, board, instrument FROM securities")
+
+	// if err != nil {
+	// 	servicelog.ErrorLog().Print(err.Error())
+	// 	writeError(w, err.Error(), http.StatusInternalServerError)
+	// 	return
+	// }
+	// defer rows.Close()
+
+	// secs := []gomoex.Security{}
+	// for rows.Next() {
+	// 	s := gomoex.Security{}
+	// 	err := rows.Scan(&s.Ticker, &s.LotSize, &s.ISIN, &s.Board, &s.Instrument)
+	// 	if err != nil {
+	// 		servicelog.ErrorLog().Print(err.Error())
+	// 		writeError(w, err.Error(), http.StatusInternalServerError)
+	// 		return
+	// 	}
+	// 	secs = append(secs, s)
+	// }
+
+	// resp, err := json.Marshal(secs)
+	// if err != nil {
+	// 	servicelog.ErrorLog().Print(err)
+	// 	writeError(w, "Не удалось сериализовать данные", http.StatusInternalServerError)
+	// 	return
+	// }
+
 	writeResponse(w, resp)
 }
 
-func Coupons(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) Coupons(w http.ResponseWriter, req *http.Request) {
 	isin := req.URL.Query().Get("isin")
 	if isin == "" {
 		err := errors.New("не укаазан ISIN")
@@ -149,7 +153,7 @@ func Coupons(w http.ResponseWriter, req *http.Request) {
 	writeResponse(w, resp)
 }
 
-func Amortizations(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) Amortizations(w http.ResponseWriter, req *http.Request) {
 	isin := req.URL.Query().Get("isin")
 	if isin == "" {
 		err := errors.New("не укаазан ISIN")
@@ -175,7 +179,7 @@ func Amortizations(w http.ResponseWriter, req *http.Request) {
 	writeResponse(w, resp)
 }
 
-func BondIndicators(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) BondIndicators(w http.ResponseWriter, req *http.Request) {
 	isin := req.URL.Query().Get("isin")
 	if isin == "" {
 		writeError(w, "Не указан ISIN ценной бумаги", http.StatusBadRequest)

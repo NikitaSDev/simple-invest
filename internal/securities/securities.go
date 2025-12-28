@@ -12,7 +12,7 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"simple-invest/internal/database"
+	"simple-invest/internal/repository"
 	"simple-invest/internal/servicelog"
 	"sort"
 	"time"
@@ -29,6 +29,14 @@ var (
 	cl            *gomoex.ISSClient
 	errNoMoexData = errors.New("no moex data provided")
 )
+
+type SecuritiesService struct {
+	repo repository.Repository
+}
+
+func New(repo repository.Repository) *SecuritiesService {
+	return &SecuritiesService{repo: repo}
+}
 
 // Показатели торгуемой облигации
 type bondIndicators struct {
@@ -102,133 +110,62 @@ type Bond struct {
 }
 
 // BondMarketData представляет торговые данные облигации:
-// Last - последняя цена сделки
 type BondMarketData struct {
-	Last float64 `json:"last"` //цена
+	Last float64 `json:"last"` //последняя цена сделки
 }
 
 func init() {
 	cl = gomoex.NewISSClient(http.DefaultClient)
 }
 
-func boardSecuritiesMOEX(engine, market string) ([]gomoex.Security, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
-
-	var board string
-	if market == gomoex.MarketBonds {
-		board = "TQCB" // Т+: Облигации - безадрес.
-	} else {
-		board = gomoex.BoardTQBR // по умолчанию Т+: Акции и ДР — безадресные сделки
-	}
-
-	var err error
-	table, err := cl.BoardSecurities(ctx, engine, market, board)
+func (s *SecuritiesService) Shares() ([]gomoex.Security, error) {
+	secs, err := s.repo.GetShares()
 	if err != nil {
-		servicelog.ErrorLog().Print(err)
-		return table, err
+		return nil, err
 	}
 
-	return table, nil
+	return secs, err
+}
+
+func (s *SecuritiesService) Bonds() ([]gomoex.Security, error) {
+	secs, err := s.repo.GetBonds()
+	if err != nil {
+		return nil, err
+	}
+
+	return secs, err
 }
 
 // DownloadShares получает данные по акциям от Мосбиржи и сохраняет в БД.
-func DownloadShares() (err error) {
+func (s *SecuritiesService) DownloadShares() (err error) {
 	secs, err := boardSecuritiesMOEX(gomoex.EngineStock, gomoex.MarketShares)
 	if err != nil {
 		return err
 	}
 
-	existing := make(map[string]bool)
-	rows, err := database.DB().Query("SELECT isin FROM securities")
+	updated, err := s.repo.UpdateShares(secs)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var isin string
-		err = rows.Scan(&isin)
-		if err != nil {
-			return err
-		}
-		existing[isin] = false
-	}
 
-	servicelog.InfoLog().Print("Загрузка данных с Мосбиржи: акции")
-	var loaded, updated int64
-	for _, s := range secs {
-		_, ok := existing[s.ISIN]
-		if ok {
-			// тут обновление
-			_, err := database.DB().Exec(`
-			UPDATE securities
-			SET ticker = $2,
-				lotsize = $3,
-				board = $4,
-				sectype = $5,
-				instrument = $6
-			WHERE isin = $1;`, s.ISIN, s.Ticker, s.LotSize, s.Board, s.Type, s.Instrument)
-			if err != nil {
-				return err
-			}
-			updated++
-		} else {
-			_, err := database.DB().Exec(`
-			INSERT INTO securities (isin, ticker, lotsize, board, sectype, instrument)
-			VALUES ($1, $2, $3, $4, $5, $6)`, s.ISIN, s.Ticker, s.LotSize, s.Board, s.Type, s.Instrument)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("added security: %s (%s)\n", s.Instrument, s.Ticker)
-			loaded++
-		}
-	}
-
-	servicelog.InfoLog().Printf("Результат закгрузки данных\nзагружено: %d, обновлено: %d", loaded, updated)
+	servicelog.InfoLog().Printf("Результат загрузки данных\nзагружено (обновлено): %d", updated)
 	return nil
 }
 
 // DownloadShares получает данные по облигациям от Мосбиржи и сохраняет в БД.
-func DownloadBonds() (err error) {
+func (s *SecuritiesService) DownloadBonds() (err error) {
 
 	secs, err := boardSecuritiesMOEX(gomoex.EngineStock, gomoex.MarketBonds)
 	if err != nil {
 		return err
 	}
 
-	existing := make(map[string]bool)
-	rows, err := database.DB().Query("SELECT isin FROM securities")
+	updated, err := s.repo.UpdateBonds(secs)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var isin string
-		err = rows.Scan(&isin)
-		if err != nil {
-			return err
-		}
-		existing[isin] = false
-	}
 
-	servicelog.InfoLog().Print("Загрузка данных с Мосбиржи: облигации")
-	var loaded, updated int64
-	for _, s := range secs {
-		_, ok := existing[s.ISIN]
-		if ok {
-			// тут обновление
-			updated++
-		} else {
-			_, err := database.DB().Exec(`
-			INSERT INTO securities (isin, ticker, lotsize, board, sectype, instrument)
-			VALUES ($1, $2, $3, $4, $5, $6)`, s.ISIN, s.Ticker, s.LotSize, s.Board, s.Type, s.Instrument)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("added security: %s (%s)\n", s.Instrument, s.Ticker)
-			loaded++
-		}
-	}
-
-	servicelog.InfoLog().Printf("Результат закгрузки данных\nзагружено: %d, обновлено: %d", loaded, updated)
+	servicelog.InfoLog().Printf("Результат загрузки данных\nзагружено (обновлено): %d", updated)
 	return nil
 
 }
@@ -485,6 +422,27 @@ func BondIndicators(isin string) (bondIndicators, error) {
 	bI.MaturityTax = matTax
 
 	return bI, nil
+}
+
+func boardSecuritiesMOEX(engine, market string) ([]gomoex.Security, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	var board string
+	if market == gomoex.MarketBonds {
+		board = "TQCB" // Т+: Облигации - безадрес.
+	} else {
+		board = gomoex.BoardTQBR // по умолчанию Т+: Акции и ДР — безадресные сделки
+	}
+
+	var err error
+	table, err := cl.BoardSecurities(ctx, engine, market, board)
+	if err != nil {
+		servicelog.ErrorLog().Print(err)
+		return table, err
+	}
+
+	return table, nil
 }
 
 func moexBond(isin string) (Bond, error) {
