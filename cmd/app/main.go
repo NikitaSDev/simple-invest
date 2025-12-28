@@ -1,31 +1,40 @@
 package main
 
 import (
-	"net/http"
-	"simple-invest/internal/database"
-	"simple-invest/internal/handlers"
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"simple-invest/internal/app"
 	"simple-invest/internal/servicelog"
-	// "github.com/nikitasdev/simple-invest/internal/database"
+	"syscall"
+	"time"
+)
+
+const (
+	timeout = 20
 )
 
 func main() {
 	defer servicelog.InfoLog().Print("Сервер остановлен")
-	defer database.DB().Close()
 
 	servicelog.InfoLog().Print("Подключение к базе данных установлено")
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handlers.DefaultHandle)
-	mux.HandleFunc("/dividends", handlers.Dividends)
-	mux.HandleFunc("/shares", handlers.Shares)
-	mux.HandleFunc("/bonds", handlers.Bonds)
-	mux.HandleFunc("/coupons", handlers.Coupons)
-	mux.HandleFunc("/amortizations", handlers.Amortizations)
-	mux.HandleFunc("/bondindicators", handlers.BondIndicators)
+	app := app.New()
+	go func() {
+		err := app.Run()
+		if err != nil {
+			log.Println(err.Error())
+		}
+	}()
 
-	port := ":7540"
-	servicelog.InfoLog().Print("Запуск сервера")
-	if err := http.ListenAndServe(port, mux); err != nil {
-		servicelog.ErrorLog().Printf("ошибка запуска сервера: %s", err.Error())
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*timeout)
+	defer cancel()
+	if err := app.Stop(ctx); err != nil {
+		log.Println("server aborted")
 	}
 }
