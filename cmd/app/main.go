@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"simple-invest/internal/app"
+	"simple-invest/internal/config"
 	"simple-invest/internal/servicelog"
 	"syscall"
 	"time"
@@ -20,7 +21,8 @@ func main() {
 
 	servicelog.InfoLog().Print("Подключение к базе данных установлено")
 
-	app := app.New()
+	cfg := config.MustLoad()
+	app := app.New(cfg.StoragePath, cfg.Port)
 	go func() {
 		err := app.Run()
 		if err != nil {

@@ -19,8 +19,8 @@ type App struct {
 	handler *handlers.Handler
 }
 
-func New() *App {
-	db, err := dbPostgreSQL()
+func New(storagePath, port string) *App {
+	db, err := dbPostgreSQL(storagePath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -32,8 +32,6 @@ func New() *App {
 	mux := http.NewServeMux()
 	setupRoutes(mux, handler)
 
-	// TODO: реализовать порт через конфигурацию
-	port := "7540"
 	app := &App{
 		db: db,
 		server: &http.Server{
@@ -76,14 +74,13 @@ func (app *App) Stop(ctx context.Context) error {
 }
 
 // TODO: строка соединения входящим параметром
-func dbPostgreSQL() (*sql.DB, error) {
-
-	connstr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=%s",
-		"postgres",
-		"postgres",
-		"invest_db",
-		"disable")
-	db, err := sql.Open("postgres", connstr)
+func dbPostgreSQL(storagePath string) (*sql.DB, error) {
+	// connstr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=%s",
+	// 	"postgres",
+	// 	"postgres",
+	// 	"invest_db",
+	// 	"disable")
+	db, err := sql.Open("postgres", storagePath)
 	if err != nil {
 		return nil, err
 	}
