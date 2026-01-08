@@ -2,41 +2,38 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"simple-invest/internal/app"
 	"simple-invest/internal/config"
-	"simple-invest/internal/servicelog"
 	"syscall"
 	"time"
 )
 
-const (
-	timeout = 20
-)
-
 func main() {
-	defer servicelog.InfoLog().Print("Сервер остановлен")
-
-	servicelog.InfoLog().Print("Подключение к базе данных установлено")
-
 	cfg := config.MustLoad()
-	app := app.New(cfg.StoragePath, cfg.Port)
+	log := setupLogger()
+	app := app.New(log, cfg.StoragePath, cfg.Port)
+
 	go func() {
-		err := app.Run()
-		if err != nil {
-			log.Println(err.Error())
-		}
+		app.MustRun()
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cfg.Timeout))
 	defer cancel()
-	if err := app.Stop(ctx); err != nil {
-		log.Println("server aborted")
-	}
+
+	app.Stop(ctx)
+
+	log.Info("server stoped")
+}
+
+func setupLogger() *slog.Logger {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+	return logger
 }

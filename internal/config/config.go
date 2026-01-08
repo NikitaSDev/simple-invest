@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -16,9 +17,9 @@ type Config struct {
 }
 
 func MustLoad() *Config {
-	fmt.Println(os.Executable())
 	err := godotenv.Load()
 	if err != nil {
+		log.Print(err)
 		panic(err)
 	}
 

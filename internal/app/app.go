@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"simple-invest/internal/handlers"
 	"simple-invest/internal/repository"
@@ -13,16 +13,16 @@ import (
 )
 
 type App struct {
-	// TODO: logger
+	log     *slog.Logger
 	db      *sql.DB
 	server  *http.Server
 	handler *handlers.Handler
 }
 
-func New(storagePath, port string) *App {
+func New(log *slog.Logger, storagePath, port string) *App {
 	db, err := dbPostgreSQL(storagePath)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	repo := repository.NewPostgresRepo(db)
@@ -33,7 +33,8 @@ func New(storagePath, port string) *App {
 	setupRoutes(mux, handler)
 
 	app := &App{
-		db: db,
+		log: log,
+		db:  db,
 		server: &http.Server{
 			Handler: mux,
 			Addr:    fmt.Sprintf(":%s", port),
@@ -54,32 +55,27 @@ func setupRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("GET /bondindicators", h.BondIndicators)
 }
 
-func (app *App) Run() error {
+func (app *App) MustRun() {
+	app.log.Info("server started")
 	if err := app.server.ListenAndServe(); err != nil {
-		return err
+		if !errors.Is(err, http.ErrServerClosed) {
+			app.log.Error(err.Error())
+			panic(err)
+		}
 	}
-	return nil
 }
 
-func (app *App) Stop(ctx context.Context) error {
-	var errs []error
+func (app *App) Stop(ctx context.Context) {
 	if err := app.server.Shutdown(ctx); err != nil {
-		errs = append(errs, err)
+		app.log.Error(err.Error())
 	}
 
 	if err := app.db.Close(); err != nil {
-		errs = append(errs, err)
+		app.log.Error(err.Error())
 	}
-	return errors.Join(errs...)
 }
 
-// TODO: строка соединения входящим параметром
 func dbPostgreSQL(storagePath string) (*sql.DB, error) {
-	// connstr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=%s",
-	// 	"postgres",
-	// 	"postgres",
-	// 	"invest_db",
-	// 	"disable")
 	db, err := sql.Open("postgres", storagePath)
 	if err != nil {
 		return nil, err
