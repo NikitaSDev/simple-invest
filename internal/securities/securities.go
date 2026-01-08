@@ -10,10 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"simple-invest/internal/repository"
-	"simple-invest/internal/servicelog"
 	"sort"
 	"time"
 
@@ -148,7 +148,7 @@ func (s *SecuritiesService) DownloadShares() (err error) {
 		return err
 	}
 
-	servicelog.InfoLog().Printf("Результат загрузки данных\nзагружено (обновлено): %d", updated)
+	log.Printf("Updated: %d", updated)
 	return nil
 }
 
@@ -165,7 +165,7 @@ func (s *SecuritiesService) DownloadBonds() (err error) {
 		return err
 	}
 
-	servicelog.InfoLog().Printf("Результат загрузки данных\nзагружено (обновлено): %d", updated)
+	log.Printf("Updated: %d", updated)
 	return nil
 
 }
@@ -194,7 +194,6 @@ func Coupons(isin string) ([]Coupon, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		servicelog.ErrorLog().Print(err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -202,7 +201,7 @@ func Coupons(isin string) ([]Coupon, error) {
 	// Читаем тело ответа
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Ошибка при чтении ответа:", err)
+		log.Print("Failed read response:", err)
 		return nil, err
 	}
 
@@ -219,7 +218,7 @@ func Coupons(isin string) ([]Coupon, error) {
 	}
 
 	if len(couponsCursor.Cursor.Data) < 1 || len(couponsCursor.Cursor.Data[0]) < 3 {
-		return nil, errors.New("некорретная структура ответа по блокам данных")
+		return nil, errors.New("incorrect data stucture")
 	}
 
 	i := couponsCursor.Cursor.Data[0][0]
@@ -241,7 +240,6 @@ func Coupons(isin string) ([]Coupon, error) {
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			servicelog.ErrorLog().Print(err.Error())
 			return nil, err
 		}
 		defer resp.Body.Close()
@@ -249,7 +247,7 @@ func Coupons(isin string) ([]Coupon, error) {
 		// Читаем тело ответа
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Println("Ошибка при чтении ответа:", err)
+			fmt.Println("Failed read response:", err)
 			return nil, err
 		}
 
@@ -257,7 +255,7 @@ func Coupons(isin string) ([]Coupon, error) {
 		var bondPayments BondPayments
 		err = json.Unmarshal(body, &bondPayments)
 		if err != nil {
-			fmt.Println("Ошибка парсинга JSON:", err)
+			fmt.Println("Failed parse JSON:", err)
 			return nil, err
 		}
 
@@ -296,7 +294,6 @@ func Amortizations(isin string) ([]Amortization, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		servicelog.ErrorLog().Print(err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -304,7 +301,7 @@ func Amortizations(isin string) ([]Amortization, error) {
 	// Читаем тело ответа
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Ошибка при чтении ответа:", err)
+		fmt.Println("Failed read response:", err)
 		return nil, err
 	}
 
@@ -312,7 +309,7 @@ func Amortizations(isin string) ([]Amortization, error) {
 	var bondPayments BondPayments
 	err = json.Unmarshal(body, &bondPayments)
 	if err != nil {
-		fmt.Println("Ошибка парсинга JSON:", err)
+		fmt.Println("Failed parse JSON:", err)
 		return nil, err
 	}
 
@@ -430,7 +427,7 @@ func boardSecuritiesMOEX(engine, market string) ([]gomoex.Security, error) {
 
 	var board string
 	if market == gomoex.MarketBonds {
-		board = "TQCB" // Т+: Облигации - безадрес.
+		board = "TQCB"
 	} else {
 		board = gomoex.BoardTQBR // по умолчанию Т+: Акции и ДР — безадресные сделки
 	}
@@ -438,7 +435,6 @@ func boardSecuritiesMOEX(engine, market string) ([]gomoex.Security, error) {
 	var err error
 	table, err := cl.BoardSecurities(ctx, engine, market, board)
 	if err != nil {
-		servicelog.ErrorLog().Print(err)
 		return table, err
 	}
 
@@ -461,7 +457,6 @@ func moexBond(isin string) (Bond, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		servicelog.ErrorLog().Print(err.Error())
 		return b, err
 	}
 	defer resp.Body.Close()
@@ -518,7 +513,6 @@ func moexBondMarketData(isin string) (BondMarketData, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		servicelog.ErrorLog().Print(err.Error())
 		return marketData, err
 	}
 	defer resp.Body.Close()
