@@ -118,6 +118,7 @@ func init() {
 	cl = gomoex.NewISSClient(http.DefaultClient)
 }
 
+// Shares возвращает список акций в виде JSON
 func (s *SecuritiesService) Shares() ([]gomoex.Security, error) {
 	secs, err := s.repo.GetShares()
 	if err != nil {
@@ -127,6 +128,7 @@ func (s *SecuritiesService) Shares() ([]gomoex.Security, error) {
 	return secs, err
 }
 
+// Bonds возвращает список облигаций в виде JSON
 func (s *SecuritiesService) Bonds() ([]gomoex.Security, error) {
 	secs, err := s.repo.GetBonds()
 	if err != nil {
@@ -171,7 +173,7 @@ func (s *SecuritiesService) DownloadBonds() (err error) {
 }
 
 // Dividends получает данные о дивидидендах акции от Мосбиржи
-func Dividends(ctx context.Context, isin string) ([]gomoex.Dividend, error) {
+func (s *SecuritiesService) Dividends(ctx context.Context, isin string) ([]gomoex.Dividend, error) {
 	dividends, err := cl.Dividends(ctx, isin)
 	if err != nil {
 		return nil, err
@@ -180,7 +182,7 @@ func Dividends(ctx context.Context, isin string) ([]gomoex.Dividend, error) {
 }
 
 // Coupons получает данные о купонах по облигации от Мосбиржи
-func Coupons(isin string) ([]Coupon, error) {
+func (s *SecuritiesService) Coupons(isin string) ([]Coupon, error) {
 	// Получение общего объёма данных и объёма, получаемого за одно обращение
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
 	defer cancel()
@@ -210,6 +212,7 @@ func Coupons(isin string) ([]Coupon, error) {
 			Data [][]int64 `json:"data"`
 		} `json:"coupons.cursor"`
 	}
+
 	// Парсим JSON
 	var couponsCursor CouponsCursor
 	err = json.Unmarshal(body, &couponsCursor)
@@ -218,7 +221,7 @@ func Coupons(isin string) ([]Coupon, error) {
 	}
 
 	if len(couponsCursor.Cursor.Data) < 1 || len(couponsCursor.Cursor.Data[0]) < 3 {
-		return nil, errors.New("incorrect data stucture")
+		return nil, errors.New("incorrect data structure")
 	}
 
 	i := couponsCursor.Cursor.Data[0][0]
@@ -227,7 +230,7 @@ func Coupons(isin string) ([]Coupon, error) {
 
 	var coupons []Coupon
 	// Последовательное получение блоков данных
-	for ; i < total; i = i + pagesize {
+	for ; i < total; i += pagesize {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
 		defer cancel()
 		url := fmt.Sprintf("https://iss.moex.com/iss/statistics/engines/stock/markets/bonds/bondization/%s.json?iss.only=coupons&iss.meta=off&start=%d", isin, i)
@@ -280,7 +283,7 @@ func Coupons(isin string) ([]Coupon, error) {
 }
 
 // Amortizations получает данные об амортизационных выплатах по облигации от Мосбиржи
-func Amortizations(isin string) ([]Amortization, error) {
+func (s *SecuritiesService) Amortizations(isin string) ([]Amortization, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(time.Second*10))
 	defer cancel()
 
@@ -332,7 +335,7 @@ func Amortizations(isin string) ([]Amortization, error) {
 }
 
 // BondIndicators возвращает JSON с основными показателями торгуемой облигации
-func BondIndicators(isin string) (bondIndicators, error) {
+func (s *SecuritiesService) BondIndicators(isin string) (bondIndicators, error) {
 	bI := bondIndicators{Isin: isin}
 
 	bond, err := moexBond(isin)
@@ -381,7 +384,7 @@ func BondIndicators(isin string) (bondIndicators, error) {
 	}
 
 	couponsAmount := 0.0
-	coupons, err := Coupons(isin)
+	coupons, err := s.Coupons(isin)
 	if err != nil {
 		return bI, err
 	}
@@ -397,7 +400,7 @@ func BondIndicators(isin string) (bondIndicators, error) {
 
 	// Для амортизируемых ооблигаций необходимо приведение периода
 	netDaysToEvent := float64(bI.DaysToEvent)
-	amortizations, err := Amortizations(isin)
+	amortizations, err := s.Amortizations(isin)
 	if err != nil {
 		return bI, err
 	}
@@ -555,16 +558,15 @@ func roundFloat(val float64, precision uint) float64 {
 }
 
 func amortizationsNetPeriod(am []Amortization, settleDate time.Time) (float64, error) {
-	if len(am) < 2 {
-		return 0, nil
-	}
-
 	sort.SliceStable(am, func(i, j int) bool {
 		return am[i].Amortdate < am[j].Amortdate
 	})
 
-	var netPeriod, periodFaceValue, pAmortization float64
-	var pDate time.Time
+	// netPeriod		- приведённый период
+	// periodFaceValue	- непогашенная часть номинала на дату амортизации
+	// amValue	- размер амортизационного платежа
+	var netPeriod, periodFaceValue, amValue float64
+	var prevDate time.Time
 	init := false
 	for i := range am {
 		date, err := time.Parse(time.DateOnly, am[i].Amortdate)
@@ -574,16 +576,16 @@ func amortizationsNetPeriod(am []Amortization, settleDate time.Time) (float64, e
 		if date.Compare(settleDate) > 0 {
 			if !init {
 				netPeriod = date.Sub(settleDate).Hours() / 24
-				pDate = date
+				prevDate = date
 				periodFaceValue = am[i].Facevalue
-				pAmortization = am[i].ValueRub
+				amValue = am[i].ValueRub
 				init = true
 				continue
 			}
-			periodFaceValue -= pAmortization
-			netPeriod += date.Sub(pDate).Hours() / 24 * periodFaceValue / am[i].Facevalue
-			pAmortization = am[i].ValueRub
-			pDate = date
+			periodFaceValue -= amValue
+			netPeriod += date.Sub(prevDate).Hours() / 24 * periodFaceValue / am[i].Facevalue
+			amValue = am[i].ValueRub
+			prevDate = date
 		}
 	}
 	return netPeriod, nil

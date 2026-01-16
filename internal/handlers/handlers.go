@@ -63,7 +63,7 @@ func (h *Handler) Dividends(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	divs, err := securities.Dividends(context.Background(), isin)
+	divs, err := h.service.Dividends(context.Background(), isin)
 	if err != nil {
 		log.Print(err)
 		writeError(w, msgMoexGettingDataFailed, http.StatusServiceUnavailable)
@@ -115,7 +115,7 @@ func (h *Handler) Coupons(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	coupons, err := securities.Coupons(isin)
+	coupons, err := h.service.Coupons(isin)
 	if err != nil {
 		log.Print(err)
 		writeError(w, msgMoexGettingDataFailed, http.StatusServiceUnavailable)
@@ -140,7 +140,7 @@ func (h *Handler) Amortizations(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	amortizations, err := securities.Amortizations(isin)
+	amortizations, err := h.service.Amortizations(isin)
 	if err != nil {
 		log.Print(err)
 		writeError(w, msgMoexGettingDataFailed, http.StatusServiceUnavailable)
@@ -165,7 +165,7 @@ func (h *Handler) BondIndicators(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	bondIndicators, err := securities.BondIndicators(isin)
+	bondIndicators, err := h.service.BondIndicators(isin)
 	if err != nil {
 		log.Print(err)
 		writeError(w, msgMoexGettingDataFailed, http.StatusServiceUnavailable)
