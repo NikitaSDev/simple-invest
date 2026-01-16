@@ -47,9 +47,9 @@ func New(log *slog.Logger, storagePath, port string) *App {
 
 func setupRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("/", h.DefaultHandle)
-	mux.HandleFunc("GET /dividends", h.Dividends)
 	mux.HandleFunc("GET /shares", h.Shares)
 	mux.HandleFunc("GET /bonds", h.Bonds)
+	mux.HandleFunc("GET /dividends", h.Dividends)
 	mux.HandleFunc("GET /coupons", h.Coupons)
 	mux.HandleFunc("GET /amortizations", h.Amortizations)
 	mux.HandleFunc("GET /bondindicators", h.BondIndicators)
